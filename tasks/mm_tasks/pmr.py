@@ -17,8 +17,8 @@ from fairseq.tasks import register_task
 from data.mm_data.pmr_base import PMRDatasetForOFA
 from data.mm_data.pmr_dataset import PMRDataset
 from tasks.ofa_task import OFAConfig, OFATask
-from data.mm_data.snli_ve_dataset import SnliVeDataset
-from data.file_dataset import FileDataset
+# from data.mm_data.snli_ve_dataset import SnliVeDataset
+# from data.file_dataset import FileDataset
 from data import data_utils
 from utils.trie import Trie
 
@@ -230,7 +230,7 @@ class PMRTask(OFATask):
             score = score if isinstance(score, float) else score.item()
             return round(score, 4)
 
-        if sum_logs("_snli_cnt") > 0:
+        if sum_logs("_pmr_cnt") > 0:
             metrics.log_scalar("_pmr_score_sum", sum_logs("_pmr_score_sum"))
             metrics.log_scalar("_pmr_cnt", sum_logs("_pmr_cnt"))
             metrics.log_derived("pmr_score", compute_score)
