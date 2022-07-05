@@ -132,7 +132,6 @@ def main(cfg: DictConfig, **kwargs):
         sample = utils.apply_to_sample(apply_half, sample) if cfg.common.fp16 else sample
         with torch.no_grad():
             result, scores = eval_step(task, generator, models, sample, **kwargs)
-
         results += result
         score_sum += sum(scores) if scores is not None else 0
         score_cnt += len(scores) if scores is not None else 0

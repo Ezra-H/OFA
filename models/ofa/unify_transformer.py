@@ -1031,6 +1031,10 @@ class TransformerDecoder(FairseqIncrementalDecoder):
                              torch.arange(self.window_size).unsqueeze(1) * image_bucket_size + 1
         image_position_idx = torch.cat([torch.tensor([0]), image_position_idx.view(-1)])
         image_position_idx = torch.cat([image_position_idx, torch.tensor([1024] * 769)])
+        
+        # image_position_idx = image_position_idx[:1025]        # TODO(HUI):  should change it.
+        # print(image_position_idx.shape)
+        
         self.image_rel_pos_table_list = nn.ModuleList(
             [Embedding(image_num_rel_dis, self.num_attention_heads, zero_init=True) for _ in range(args.decoder_layers)]
         )
@@ -1039,6 +1043,12 @@ class TransformerDecoder(FairseqIncrementalDecoder):
         self.register_buffer("image_rp_bucket", image_rp_bucket)
         self.register_buffer("image_position_idx", image_position_idx)
         self.entangle_position_embedding = args.entangle_position_embedding
+
+        if self.args.task == 'pmr':
+            del self.image_rel_pos_table_list
+            del self.embed_image_positions
+            del self.image_pos_ln
+            del self.code_layernorm_embedding
 
     def build_output_projection(self, args, dictionary, embed_tokens):
         if args.adaptive_softmax_cutoff is not None:
@@ -1419,17 +1429,19 @@ class TransformerDecoder(FairseqIncrementalDecoder):
             if (prefix + param_name) not in state_dict:
                 state_dict[prefix + param_name] = self.state_dict()[param_name]
 
-        if len(state_dict["decoder.embed_image_positions.weight"]) < len(self.state_dict()["embed_image_positions.weight"]):
-            num_posids_to_add = len(self.state_dict()["embed_image_positions.weight"]) - len(state_dict["decoder.embed_image_positions.weight"])
-            embed_dim = state_dict["decoder.embed_image_positions.weight"].size(1)
-            new_pos_embed_to_add = torch.zeros(num_posids_to_add, embed_dim)
-            nn.init.normal_(new_pos_embed_to_add, mean=0, std=embed_dim ** -0.5)
-            new_pos_embed_to_add = new_pos_embed_to_add.to(
-                dtype=state_dict["decoder.embed_image_positions.weight"].dtype,
-            )
-            state_dict["decoder.embed_image_positions.weight"] = torch.cat(
-                [state_dict["decoder.embed_image_positions.weight"], new_pos_embed_to_add]
-            )
+        if 'embed_image_positions.weight' in self.state_dict():
+            if len(state_dict["decoder.embed_image_positions.weight"]) < len(self.state_dict()["embed_image_positions.weight"]):
+                num_posids_to_add = len(self.state_dict()["embed_image_positions.weight"]) - len(state_dict["decoder.embed_image_positions.weight"])
+                embed_dim = state_dict["decoder.embed_image_positions.weight"].size(1)
+                new_pos_embed_to_add = torch.zeros(num_posids_to_add, embed_dim)
+                nn.init.normal_(new_pos_embed_to_add, mean=0, std=embed_dim ** -0.5)
+                new_pos_embed_to_add = new_pos_embed_to_add.to(
+                    dtype=state_dict["decoder.embed_image_positions.weight"].dtype,
+                )
+                state_dict["decoder.embed_image_positions.weight"] = torch.cat(
+                    [state_dict["decoder.embed_image_positions.weight"], new_pos_embed_to_add]
+                )
+        
         return state_dict
 
 

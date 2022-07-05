@@ -41,6 +41,10 @@ def collate(samples, pad_idx, eos_idx):
         )
 
     id = np.array([s["id"] for s in samples])
+    img_id = np.array([s["img_id"] for s in samples])
+    ans_pos_idx = np.array([s["ans_pos_idx"] for s in samples])
+    answer_label = np.array([s["answer_label"] for s in samples])
+
     src_tokens = merge("source")
     src_lengths = torch.LongTensor([s["source"].ne(pad_idx).long().sum() for s in samples])
 
@@ -87,7 +91,10 @@ def collate(samples, pad_idx, eos_idx):
         "ref_dict": ref_dict,
         "constraint_masks": constraint_masks,
         "decoder_prompts": decoder_prompts,
-        "target": target
+        "target": target,
+        "img_id": img_id,
+        "ans_pos_idx": ans_pos_idx,
+        "answer_label": answer_label,
     }
 
     return batch
@@ -142,6 +149,7 @@ class PMRDataset(OFADataset):
         hypothesis = data_frame['premise']
         caption = data_frame['answer']
         label = data_frame['label']
+        description = data_frame['description']
         
         if label == "Action-True":
             label = 'yes'
@@ -156,13 +164,20 @@ class PMRDataset(OFADataset):
         patch_mask = torch.tensor([True])
 
         hypothesis = self.pre_caption(hypothesis, self.max_src_length)
-        src_item = self.encode_text(' does the image describe " {} "?'.format(hypothesis))
+        if description is None:
+            src_item = self.encode_text(' does the image describe " {} "?'.format(hypothesis))
+        else:
+            src_item = self.encode_text(' we know " {} ". does the image describe " {} "?'.format(description, hypothesis))
+            
         tgt_item = self.encode_text(" {}".format(label))
         ref_dict = {label: 1.0}
 
-        if self.add_caption:
+        if self.add_caption:  # TODO(HUI): try exchanging the text1 and text2 position
             caption = self.pre_caption(caption, self.max_src_length)
-            src_item = self.encode_text(' can image and text1 " {} " imply text2 " {} "?'.format(caption, hypothesis))
+            if description is None:
+                src_item = self.encode_text(' can image and text1 " {} " imply text2 " {} "?'.format(caption, hypothesis))
+            else:
+                src_item = self.encode_text(' we know " {} ". can image and text1 " {} " imply text2 " {} "?'.format(description, caption, hypothesis))
 
         src_item = torch.cat([self.bos_item, src_item, self.eos_item])
         if self.prompt_type == 'none':
@@ -191,6 +206,8 @@ class PMRDataset(OFADataset):
             "prev_output_tokens": prev_output_item,
             "decoder_prompt": decoder_prompt,
             "ref_dict": ref_dict,
+            "ans_pos_idx": data_frame['ans_pos_idx'],
+            "answer_label": data_frame['answer_label'],
         }
         if self.constraint_trie is not None:
             constraint_mask = torch.zeros((len(target_item), len(self.tgt_dict))).bool()

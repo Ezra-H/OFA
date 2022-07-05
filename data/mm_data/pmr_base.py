@@ -5,19 +5,14 @@ from collections import defaultdict
 
 import json
 import jsonlines
+import numpy as np
 import torch
 from torch.utils.data import Dataset
 from torch.nn.utils.rnn import pad_sequence
 
-from src.utils.args import get_global_tokenizer
-# from .utils import read_jsonl, read_json
-
 from transformers import AutoTokenizer
 from PIL import Image
-from toolz.sandbox import unzip
-
 import multiprocessing
-from concurrent.futures.process import ProcessPoolExecutor
 
 from tasks.mm_tasks.dist import broadcast, get_world_size, get_rank
 
@@ -51,7 +46,7 @@ def read_json(fname):
 
 class PMRDatasetReturnImg(Dataset):
     def __init__(self, img_db=None, anno_dir=None,
-                 transform=None, sample=-1,
+                 transform=None,
                  split='train', use_adv=False,
                  use_syn_caption=False, syn_caption_root=None,
                  whole_img_first=False,):
@@ -63,8 +58,6 @@ class PMRDatasetReturnImg(Dataset):
         self.split = split
         
         self.transform = transform
-        
-        self.tokenizer = get_global_tokenizer()
         
         self.annos = read_jsonl(anno_dir)
         
@@ -89,17 +82,38 @@ class PMRDatasetReturnImg(Dataset):
                 self.syn_captions_adv = read_json(
                     os.path.join(self.syn_caption_root, adv_map[split].replace('jsonl', 'json')))
         
-        if sample != -1:
-            self.annos = self.annos[:sample]
-        
-        # with open('dataset/gender-neutral-names.txt') as f:
-        #     self.gender_neutral_names = [l.strip('\n') for l in f.readlines()]
         self.person_name_id = 0
         
         self.classes = ["Action-True", "Action-False", "Distractor1", "Distractor2"]
         self.category_list = ['personality', 'identity', 'mood', 'antecedent', 'environment', 'character', 'surroundings', 'relationship']
     
         self.prepare_data()
+
+    def process_syn_caption(self, premise, answer_choices, syn_captions, object_map):
+        used_object_list = []
+        for mix_token in premise:
+            if isinstance(mix_token, list):
+                used_object_list.append(mix_token[0])
+        for one_answer in answer_choices:
+            for mix_token in one_answer:
+                if isinstance(mix_token, list):
+                    used_object_list.append(mix_token[0])
+    
+        used_object_list = np.asarray(list(set(used_object_list)))
+    
+        split_syn_captions = []
+        for syn_caption in syn_captions:
+            syn_caption = syn_caption.replace('a close up of ', '')
+            syn_caption = syn_caption.replace('a blurry photo of ', '')
+            syn_caption = syn_caption.replace('a blurry picture of ', '')
+            split_syn_captions.append(syn_caption + '.')
+    
+        description = ''
+        for idx, caption in enumerate(split_syn_captions):
+            if idx in used_object_list:
+                description += f'{object_map(idx)} is {caption}.'
+    
+        return premise
 
     def prepare_data(self):
         self.examples = []
@@ -122,11 +136,13 @@ class PMRDatasetReturnImg(Dataset):
             object_map = {f'[{i}]': o for i, o in enumerate(objects)}
         
             premise = self._convert_tokens(data['premise'], object_map)
-        
+
+            description = None
             if self.use_syn_caption:  # TODO(HUI): use shuffle to diverse the input.
-                premise = ' '.join(
-                    [premise] + [f'{o} is {t}.' for ro, o, t in
-                                 zip(raw_object_names, objects, self.syn_captions[str(total_id)]) if ro == 'person'])
+                description = self.process_syn_caption(data['premise'], data['answer_choices'], self.syn_captions[str(total_id)])
+    
+                # premise = ' '.join([f'{o} is {t}.' for ro, o, t in
+                #                     zip(raw_object_names, objects, self.syn_captions[str(total_id)]) if ro == 'person'])
         
             for j, answer in enumerate(data['answer_choices']):
                 answer = self._convert_tokens(answer, object_map)
@@ -141,17 +157,20 @@ class PMRDatasetReturnImg(Dataset):
                 # ITM task.
                 is_answer = -1
                 answer_label = -1
+                label='Action-False'
                 if 'answer_label' in data:
                     is_answer = j == data['answer_label']
                     answer_label = data['answer_label']  # for eval
+                    label = data['answer_types'][j]
 
                 self.examples.append(
                     dict(img_dir=img_dir, premise=premise, answer=answer,
-                         label=data['answer_types'][j],
+                         label=label,
                          rois_meta=rois_meta, objects=objects,
                          target=target, is_answer=is_answer, total_id=total_id,
                          img_id=img_id, ans_pos_idx=j, answer_label=answer_label,
-                         category_id=category_id)
+                         category_id=category_id, description=description
+                         )
                 )
             
                 # self.examples.append(
@@ -165,18 +184,26 @@ class PMRDatasetReturnImg(Dataset):
                     adv_premise = self._convert_tokens(adv_data['premise'], object_map)  # same objects
                     adv_answer = self._convert_tokens(adv_data['answer_choices'][j], object_map)
                 
-                    if self.use_syn_caption:  # TODO(HUI): use shuffle to diverse the input.
-                        adv_premise = ' '.join(
-                            [adv_premise] + [f'{o} is {t}.' for ro, o, t in
-                                             zip(raw_object_names, objects, self.syn_captions_adv[str(total_id)]) if
-                                             ro == 'person'])
+                    # if self.use_syn_caption:  # TODO(HUI): use shuffle to diverse the input.
+                        # adv_premise = ' '.join(
+                        #     [adv_premise] + [f'{o} is {t}.' for ro, o, t in
+                        #                      zip(raw_object_names, objects, self.syn_captions_adv[str(total_id)]) if
+                        #                      ro == 'person'])
+                        # description = self.process_syn_caption(data['premise'], data['answer_choices'],
+                        #                                        self.syn_captions[str(total_id)])
+
+                        # adv_premise = self.process_syn_caption(premise,
+                        #                                    data['answer_choices'],
+                        #                                    self.syn_captions[str(data['total_id'])])
+                        
                     self.examples.append(
                         dict(img_dir=img_dir, premise=adv_premise, answer=adv_answer,
                              rois_meta=rois_meta, objects=objects,
                              label=data['answer_types'][j],
                              target=target, is_answer=is_answer, total_id=total_id,
                              img_id=img_id, ans_pos_idx=j, answer_label=answer_label,
-                             category_id=category_id)
+                             category_id=category_id,
+                             description=description)
                     )
                     
                     # self.examples.append(
@@ -263,6 +290,7 @@ class PMRDatasetReturnImg(Dataset):
         #  roi, position, objects,
         #  target, is_answer, total_id, img_id, ans_pos_idx, answer_label) = self.get_one_example(index)
         
+        raise NotImplementedError
         tokenized = self.tokenizer(f"Premise: {premise} Answer: {answer}",
                                    padding="max_length",
                                    truncation=True,

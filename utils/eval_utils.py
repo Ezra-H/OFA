@@ -4,6 +4,8 @@
 # found in the LICENSE file in the root directory.
 
 import string
+
+import jsonlines
 import math
 import json
 from itertools import chain
@@ -16,6 +18,12 @@ from data import data_utils
 from tasks.nlg_tasks.gigaword import fix_tokenization
 
 
+def save_jsonl(fname, data):
+    assert isinstance(data, list)
+    with jsonlines.open(fname, mode='w') as f:
+        for d in data:
+            f.write(d)
+            
 def get_symbols_to_strip_from_output(generator):
     if hasattr(generator, "symbols_to_strip_from_output"):
         return generator.symbols_to_strip_from_output
@@ -299,6 +307,70 @@ def eval_image_classify(task, generator, models, sample, **kwargs):
     return results, scores
 
 
+def eval_pmr(task, generator, models, sample, **kwargs):
+    encoder_out = models[0].encoder(
+        sample["net_input"]["src_tokens"],
+        src_lengths=sample["net_input"]["src_lengths"],
+        patch_images=sample["net_input"]["patch_images"],
+        patch_masks=sample["net_input"]["patch_masks"]
+    )
+    device = sample["net_input"]["src_tokens"].device
+    eos_item = torch.tensor([task.src_dict.eos()])
+    pad = task.src_dict.pad()
+    valid_result = []
+    for valid_answers, valid_constraint_masks in zip(task.valid_answers_list, task.valid_constraint_masks_list):
+        valid_size = len(valid_answers)
+        valid_tgt_items = [
+            torch.cat([torch.tensor(decoder_prompt[1:]), valid_answer, eos_item])
+            for decoder_prompt in sample["decoder_prompts"] for valid_answer in valid_answers
+        ]
+        valid_prev_items = [
+            torch.cat([torch.tensor(decoder_prompt), valid_answer])
+            for decoder_prompt in sample["decoder_prompts"] for valid_answer in valid_answers
+        ]
+        valid_constraint_mask_items = [
+            torch.cat(
+                [torch.zeros(len(decoder_prompt) - 1, valid_constraint_mask.size(1)).bool(), valid_constraint_mask],
+                dim=0
+            )
+            for decoder_prompt in sample["decoder_prompts"] for valid_constraint_mask in valid_constraint_masks
+        ]
+        valid_tgt = data_utils.collate_tokens(valid_tgt_items, pad_idx=pad).to(device)
+        valid_prev_output = data_utils.collate_tokens(valid_prev_items, pad_idx=pad).to(device)
+        valid_constraint_masks = data_utils.collate_tokens(valid_constraint_mask_items, pad_idx=pad).to(device)
+
+        new_encoder_out = {}
+        new_encoder_out["encoder_out"] = [
+            encoder_out["encoder_out"][0].repeat_interleave(valid_size, dim=1)
+        ]
+        new_encoder_out["encoder_padding_mask"] = [
+            encoder_out["encoder_padding_mask"][0].repeat_interleave(valid_size, dim=0)
+        ]
+        new_encoder_out["position_embeddings"] = [
+            encoder_out["position_embeddings"][0].repeat_interleave(valid_size, dim=0)
+        ]
+
+        decoder_out = models[0].decoder(valid_prev_output, encoder_out=new_encoder_out)
+        decoder_out[0].masked_fill_(~valid_constraint_masks, -math.inf)
+        lprobs = models[0].get_normalized_probs(decoder_out, log_probs=True)
+        scores = lprobs.gather(dim=-1, index=valid_tgt.unsqueeze(-1)).squeeze(-1)
+        scores = scores.masked_fill(valid_tgt.eq(task.tgt_dict.pad()), 0)
+        scores = scores.masked_fill((~valid_constraint_masks).all(2), 0)
+        scores = scores.sum(1)
+        scores = scores.view(-1, valid_size)
+        valid_result.append(scores)
+        
+    valid_result = torch.cat(valid_result, dim=-1)
+    predicts = valid_result.argmax(1).tolist()
+    scores_list = valid_result.softmax(dim=-1).cpu().numpy().tolist()
+    hyps = [task.index2ans[predict_index] for predict_index in predicts]
+    results = [{"total_id": id, "img_id": img_id, "answer_label": answer_label, 'ans_pos_idx': ans_pos_idx, f"answer_prediction_{ans_pos_idx}": hyp, "answer_score": score}
+               for id, img_id, ans_pos_idx, answer_label, hyp, score in
+               zip(sample["id"].tolist(), sample["img_id"].tolist(), sample["ans_pos_idx"], sample["answer_label"], hyps, scores_list)]
+    scores = [ref_dict.get(hyp, 0) for ref_dict, hyp in zip(sample['ref_dict'], hyps)]
+    return results, scores
+
+
 def eval_step(task, generator, models, sample, **kwargs):
     if task.cfg._name == 'caption':
         return eval_caption(task, generator, models, sample, **kwargs)
@@ -316,6 +388,8 @@ def eval_step(task, generator, models, sample, **kwargs):
         return eval_gigaword(task, generator, models, sample, **kwargs)
     elif task.cfg._name == 'image_classify':
         return eval_image_classify(task, generator, models, sample, **kwargs)
+    elif task.cfg._name == 'pmr':
+        return eval_pmr(task, generator, models, sample, **kwargs)
     else:
         raise NotImplementedError
 
@@ -329,6 +403,27 @@ def merge_results(task, cfg, logger, score_cnt, score_sum, results):
             logger.info("score_sum: {}, score_cnt: {}, score: {}".format(
                 score_sum, score_cnt, round(score_sum.item() / score_cnt.item(), 4)
             ))
+    elif task.cfg._name == 'pmr':
+        if cfg.distributed_training.distributed_world_size > 1:
+            # dist.all_reduce(score_sum.data)
+            # dist.all_reduce(score_cnt.data)
+            raise NotImplementedError
+
+        total_id2score = dict()
+        for item in results:
+            if item['total_id'] not in total_id2score:
+                total_id2score[item['total_id']] = dict(total_id=item['total_id'],
+                                                        img_id=item['img_id'],
+                                                        scores=torch.zeros((4)))
+            total_id2score[item['total_id']]['scores'][item['ans_pos_idx']] = item['answer_score'][1]  # second is the action-true logit. (yes)
+
+        for k in total_id2score:
+            total_id2score[k]['prediction'] = total_id2score[k]['scores'].argmax().item()
+            total_id2score[k]['scores'] = total_id2score[k]['scores'].numpy().tolist()
+            
+        result_file = os.path.join(cfg.common_eval.results_path, "{}_text_predict.jsonl".format(cfg.dataset.gen_subset))
+        save_jsonl(result_file, list(total_id2score.values()))
+        logger.info(f"PMR task save result in {result_file}")
     else:
         gather_results = None
         if cfg.distributed_training.distributed_world_size > 1:

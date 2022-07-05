@@ -64,6 +64,7 @@ class PMRConfig(OFAConfig):
         metadata={"help": "add caption to encoder"},
     )
 
+
 @register_task("pmr", dataclass=PMRConfig)
 class PMRTask(OFATask):
     def __init__(self, cfg: PMRConfig, src_dict, tgt_dict):
@@ -73,7 +74,7 @@ class PMRTask(OFATask):
     def load_dataset(self, split, epoch=1, combine=False, **kwargs):
         paths = self.cfg.data.split(',')
         assert len(paths) > 0
-        print(split)
+
         split2file = dict(train='train-ori.jsonl',
                           val='val-ori.jsonl',
                           test='test-ori-without-label.jsonl')
@@ -81,12 +82,6 @@ class PMRTask(OFATask):
         split2adv_file = dict(train='train-adv.jsonl',
                               val='val-adv.jsonl',
                               test='test-ori-without-label.jsonl')  # TODO(HUI): test not release.
-
-        # if split == 'train':
-        #     file_path = paths[(epoch - 1) % (len(paths) - 1)]
-        # else:
-        #     file_path = paths[-1]
-        # dataset = FileDataset(file_path, self.cfg.selected_cols)
 
         split_pmr = 'val' if split == 'valid' else split
         dataset = PMRDatasetForOFA(
