@@ -111,7 +111,8 @@ class PMRDatasetReturnImg(Dataset):
         description = ''
         for idx, caption in enumerate(split_syn_captions):
             if idx in used_object_list:
-                description += f'{object_map(idx)} is {caption}.'
+                object_name = object_map[f"[{idx}]"]
+                description += f'{object_name} is {caption}.'
     
         return premise
 
@@ -139,7 +140,9 @@ class PMRDatasetReturnImg(Dataset):
 
             description = None
             if self.use_syn_caption:  # TODO(HUI): use shuffle to diverse the input.
-                description = self.process_syn_caption(data['premise'], data['answer_choices'], self.syn_captions[str(total_id)])
+                description = self.process_syn_caption(
+                    data['premise'], data['answer_choices'],
+                    self.syn_captions[str(total_id)], object_map)
     
                 # premise = ' '.join([f'{o} is {t}.' for ro, o, t in
                 #                     zip(raw_object_names, objects, self.syn_captions[str(total_id)]) if ro == 'person'])

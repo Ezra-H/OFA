@@ -19,7 +19,7 @@ CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python3 -m torch.distributed.launch --nproc
     ${data} \
     --path=${path} \
     --user-dir=${user_dir} \
-    --task=snli_ve \
+    --task=pmr \
     --batch-size=8 \
     --log-format=simple --log-interval=10 \
     --seed=7 \
