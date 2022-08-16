@@ -219,6 +219,15 @@ class RandomResize(object):
             return resize(img, target, size, self.max_size)
 
 
+class Resize(object):
+    def __init__(self, sizes):
+        assert isinstance(sizes, (list, tuple))
+        self.sizes = sizes
+
+    def __call__(self, img, target=None):
+        return resize(img, target, self.sizes)
+        
+        
 class ToTensor(object):
     def __call__(self, img, target):
         return F.to_tensor(img), target

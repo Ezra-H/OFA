@@ -63,8 +63,15 @@ class PMRConfig(OFAConfig):
         default=False,
         metadata={"help": "add caption to encoder"},
     )
-
-
+    gradient_checkpoint_interval: Optional[int] = field(
+        default=2,
+        metadata={"help": "add caption to encoder"},
+    )
+    add_bbox_info: Optional[bool] = field(
+        default=False,
+        metadata={"help": "add caption to encoder"},
+    )
+    
 @register_task("pmr", dataclass=PMRConfig)
 class PMRTask(OFATask):
     def __init__(self, cfg: PMRConfig, src_dict, tgt_dict):
@@ -90,7 +97,8 @@ class PMRTask(OFATask):
             split=split_pmr,
             use_adv=self.cfg.use_adv,
             use_syn_caption=self.cfg.use_syn_caption,
-            syn_caption_root=self.cfg.syn_caption_root)
+            syn_caption_root=self.cfg.syn_caption_root,
+            add_bbox_info=self.cfg.add_bbox_info)
 
         self.datasets[split] = PMRDataset(
             split,

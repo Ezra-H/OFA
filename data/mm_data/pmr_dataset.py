@@ -12,6 +12,7 @@ import numpy as np
 import torch
 import base64
 from torchvision import transforms
+import utils.transforms as T
 
 from PIL import Image, ImageFile
 
@@ -138,6 +139,15 @@ class PMRDataset(OFADataset):
             transforms.ToTensor(),
             transforms.Normalize(mean=mean, std=std),
         ])
+        
+        self.patch_resize_transform = T.Compose([
+            lambda image, target: (image.convert("RGB"), target),
+            T.Resize((patch_image_size, patch_image_size)),
+            T.ToTensor(),
+            T.Normalize(mean=mean, std=std, max_image_size=patch_image_size)
+        ])
+        
+        self.num_bins = 1000
 
     def __getitem__(self, index):
         # uniq_id, image, hypothesis, caption, label = self.dataset[index]
@@ -150,6 +160,8 @@ class PMRDataset(OFADataset):
         caption = data_frame['answer']
         label = data_frame['label']
         description = data_frame['description']
+        used_object_ids = data_frame['used_object_ids']
+        object_tag2str = data_frame['object_tag2str']
         
         if label == "Action-True":
             label = 'yes'
@@ -160,8 +172,20 @@ class PMRDataset(OFADataset):
         
         image = Image.open(image)
         # image = Image.open(BytesIO(base64.urlsafe_b64decode(image)))
-        patch_image = self.patch_resize_transform(image)
+        patch_image, bbox_target = self.patch_resize_transform(image, dict(boxes=torch.as_tensor(list(data_frame['rois_meta'].values()))[:,:4]))
         patch_mask = torch.tensor([True])
+
+        if self.dataset.add_bbox_info:
+            if description is None:
+                description = ''
+            for object_id, box_info in enumerate(bbox_target["boxes"]):
+                if object_id in used_object_ids:
+                    quant_x0 = "<bin_{}>".format(int((box_info[0] * (self.num_bins - 1)).round()))
+                    quant_y0 = "<bin_{}>".format(int((box_info[1] * (self.num_bins - 1)).round()))
+                    quant_x1 = "<bin_{}>".format(int((box_info[2] * (self.num_bins - 1)).round()))
+                    quant_y1 = "<bin_{}>".format(int((box_info[3] * (self.num_bins - 1)).round()))
+                    region_coord = "{} {} {} {}".format(quant_x0, quant_y0, quant_x1, quant_y1)
+                    description += f" {object_tag2str[f'[{object_id}]']} is at {region_coord}."
 
         hypothesis = self.pre_caption(hypothesis, self.max_src_length)
         if description is None:

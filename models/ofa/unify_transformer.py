@@ -304,6 +304,7 @@ class TransformerModel(FairseqEncoderDecoderModel):
         if getattr(args, "offload_activations", False):
             args.checkpoint_activations = True  # offloading implies checkpointing
         encoder = cls.build_encoder(args, src_dict, encoder_embed_tokens)
+        args.checkpoint_activations = False
         decoder = cls.build_decoder(args, tgt_dict, decoder_embed_tokens)
         if not args.share_all_embeddings:
             min_params_to_wrap = getattr(
@@ -474,9 +475,22 @@ class TransformerEncoder(FairseqEncoder):
             self.layers = nn.ModuleList([])
 
         dpr = [x.item() for x in torch.linspace(0, args.encoder_drop_path_rate, args.encoder_layers)]
-        self.layers.extend(
-            [self.build_encoder_layer(args, drop_path_rate=dpr[i]) for i in range(args.encoder_layers)]
-        )
+
+
+        use_gradient_checkpoint = args.checkpoint_activations
+        for i in range(args.encoder_layers):
+            if use_gradient_checkpoint and (i+1) % args.gradient_checkpoint_interval  == 0:
+                args.checkpoint_activations = True
+            elif use_gradient_checkpoint:
+                args.checkpoint_activations = False
+
+            self.layers.extend(
+                [self.build_encoder_layer(args, drop_path_rate=dpr[i])]
+            )
+        
+        # self.layers.extend(
+        #     [self.build_encoder_layer(args, drop_path_rate=dpr[i]) for i in range(args.encoder_layers)]
+        # )
         self.num_layers = len(self.layers)
 
         if args.encoder_normalize_before:
@@ -993,12 +1007,24 @@ class TransformerDecoder(FairseqIncrementalDecoder):
             self.layers = nn.ModuleList([])
 
         dpr = [x.item() for x in torch.linspace(0, args.decoder_drop_path_rate, args.decoder_layers)]
-        self.layers.extend(
-            [
-                self.build_decoder_layer(args, no_encoder_attn, drop_path_rate=dpr[i])
-                for i in range(args.decoder_layers)
-            ]
-        )
+        
+        use_gradient_checkpoint = args.checkpoint_activations
+        for i in range(args.decoder_layers):
+            if use_gradient_checkpoint and (i+1) % args.gradient_checkpoint_interval == 0:
+                args.checkpoint_activations = True
+            elif use_gradient_checkpoint:
+                args.checkpoint_activations = False
+
+            self.layers.extend(
+                [self.build_decoder_layer(args, no_encoder_attn, drop_path_rate=dpr[i])]
+            )
+        
+        # self.layers.extend(
+        #     [
+        #         self.build_decoder_layer(args, no_encoder_attn, drop_path_rate=dpr[i])
+        #         for i in range(args.decoder_layers)
+        #     ]
+        # )
         self.num_layers = len(self.layers)
 
         if args.decoder_normalize_before:
@@ -1032,8 +1058,8 @@ class TransformerDecoder(FairseqIncrementalDecoder):
         image_position_idx = torch.cat([torch.tensor([0]), image_position_idx.view(-1)])
         image_position_idx = torch.cat([image_position_idx, torch.tensor([1024] * 769)])
         
-        # image_position_idx = image_position_idx[:1025]        # TODO(HUI):  should change it.
-        # print(image_position_idx.shape)
+        image_position_idx = image_position_idx[:1025]        # TODO(HUI):  should change it.
+        print(image_position_idx.shape)
         
         self.image_rel_pos_table_list = nn.ModuleList(
             [Embedding(image_num_rel_dis, self.num_attention_heads, zero_init=True) for _ in range(args.decoder_layers)]

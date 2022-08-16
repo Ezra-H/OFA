@@ -49,7 +49,8 @@ class PMRDatasetReturnImg(Dataset):
                  transform=None,
                  split='train', use_adv=False,
                  use_syn_caption=False, syn_caption_root=None,
-                 whole_img_first=False,):
+                 whole_img_first=False,
+                 add_bbox_info=False,num_bins=1000):
         super(PMRDatasetReturnImg, self).__init__()
         
         self.img_db = img_db
@@ -64,6 +65,9 @@ class PMRDatasetReturnImg(Dataset):
         adv_map = dict(train='train-adv.jsonl', val='val-adv.jsonl')
         
         self.whole_img_first=whole_img_first
+        
+        self.add_bbox_info = add_bbox_info
+        self.num_bins=num_bins
         
         self.use_adv = use_adv
         self.use_syn_caption = use_syn_caption
@@ -89,32 +93,32 @@ class PMRDatasetReturnImg(Dataset):
     
         self.prepare_data()
 
-    def process_syn_caption(self, premise, answer_choices, syn_captions, object_map):
-        used_object_list = []
-        for mix_token in premise:
-            if isinstance(mix_token, list):
-                used_object_list.append(mix_token[0])
-        for one_answer in answer_choices:
-            for mix_token in one_answer:
-                if isinstance(mix_token, list):
-                    used_object_list.append(mix_token[0])
-    
-        used_object_list = np.asarray(list(set(used_object_list)))
-    
+    def process_syn_caption(self, used_object_ids, syn_captions, object_map):
+        # used_object_list = []
+        # for mix_token in premise:
+        #     if isinstance(mix_token, list):
+        #         used_object_list.append(mix_token[0])
+        # for one_answer in answer_choices:
+        #     for mix_token in one_answer:
+        #         if isinstance(mix_token, list):
+        #             used_object_list.append(mix_token[0])
+        #
+        # used_object_list = np.asarray(list(set(used_object_list)))
+
         split_syn_captions = []
         for syn_caption in syn_captions:
             syn_caption = syn_caption.replace('a close up of ', '')
             syn_caption = syn_caption.replace('a blurry photo of ', '')
             syn_caption = syn_caption.replace('a blurry picture of ', '')
-            split_syn_captions.append(syn_caption + '.')
+            split_syn_captions.append(syn_caption)
     
         description = ''
         for idx, caption in enumerate(split_syn_captions):
-            if idx in used_object_list:
+            if idx in used_object_ids:
                 object_name = object_map[f"[{idx}]"]
-                description += f'{object_name} is {caption}.'
+                description += f' {object_name} is {caption}.'
     
-        return premise
+        return description.strip()
 
     def prepare_data(self):
         self.examples = []
@@ -138,12 +142,24 @@ class PMRDatasetReturnImg(Dataset):
         
             premise = self._convert_tokens(data['premise'], object_map)
 
+            # prepare the used object ids.
+            used_object_ids = []
+            for mix_token in premise:
+                if isinstance(mix_token, list):
+                    used_object_ids.append(mix_token[0])
+            for one_answer in data['answer_choices']:
+                for mix_token in one_answer:
+                    if isinstance(mix_token, list):
+                        used_object_ids.append(mix_token[0])
+            used_object_ids = np.asarray(list(set(used_object_ids)))
+
             description = None
             if self.use_syn_caption:  # TODO(HUI): use shuffle to diverse the input.
                 description = self.process_syn_caption(
-                    data['premise'], data['answer_choices'],
+                    # data['premise'], data['answer_choices'],
+                    used_object_ids,
                     self.syn_captions[str(total_id)], object_map)
-    
+
                 # premise = ' '.join([f'{o} is {t}.' for ro, o, t in
                 #                     zip(raw_object_names, objects, self.syn_captions[str(total_id)]) if ro == 'person'])
         
@@ -172,7 +188,8 @@ class PMRDatasetReturnImg(Dataset):
                          rois_meta=rois_meta, objects=objects,
                          target=target, is_answer=is_answer, total_id=total_id,
                          img_id=img_id, ans_pos_idx=j, answer_label=answer_label,
-                         category_id=category_id, description=description
+                         category_id=category_id, description=description,
+                         used_object_ids=used_object_ids, object_tag2str=object_map,
                          )
                 )
             
@@ -339,7 +356,6 @@ class PMRDatasetReturnImg(Dataset):
         ans_pos_idxs = torch.tensor(collections['ans_pos_idx'], dtype=torch.long)
         answer_labels = torch.tensor(collections['answer_label'], dtype=torch.long)
         
-
         num_bboxes = [roi.size(0) for roi in collections['roi']]
         roi = self._pad_tensors(collections['roi'], num_bboxes)
         position = self._pad_tensors(collections['position'], num_bboxes)

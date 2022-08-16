@@ -80,7 +80,7 @@ for max_epoch in {6,}; do
         --keep-best-checkpoints=1 \
         --save-interval=1 --validate-interval=1 \
         --save-interval-updates=500 --validate-interval-updates=500 \
-        --best-checkpoint-metric=snli_score --maximize-best-checkpoint-metric \
+        --best-checkpoint-metric=pmr_score --maximize-best-checkpoint-metric \
         --max-src-length=${max_src_length} \
         --max-tgt-length=${max_tgt_length} \
         --find-unused-parameters \

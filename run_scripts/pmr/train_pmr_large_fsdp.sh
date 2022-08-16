@@ -2,32 +2,32 @@
 
 # The port for communication. Note that if you want to run multiple tasks on the same machine,
 # you need to specify different port numbers.
-export MASTER_PORT=7061
+export MASTER_PORT=7051
 
-log_dir=./logs
-save_dir=./checkpoints
+log_dir=./logs_large_fsdp
+save_dir=./checkpoints_large_fsdp
 mkdir -p $log_dir $save_dir
 
 bpe_dir=../../utils/BPE
 user_dir=../../ofa_module
 
-data_dir=../../dataset/pmr_data
-data=${data_dir}/pmr_train.tsv,${data_dir}/pmr_dev.tsv
-restore_file=../../checkpoints/ofa_base.pt
+data_dir=../../dataset/snli_ve_data
+data=${data_dir}/snli_ve_train.tsv,${data_dir}/snli_ve_dev.tsv  # no use in pmr
+restore_file=../../checkpoints/ofa_large.pt
 selected_cols=0,2,3,4,5
 
 task=pmr
-arch=ofa_base
+arch=ofa_large
 criterion=adjust_label_smoothed_cross_entropy
 label_smoothing=0.0
 lr=3e-5
 max_epoch=20
 warmup_ratio=0.06
-batch_size=4
+batch_size=3
 update_freq=8
 resnet_drop_path_rate=0.0
-encoder_drop_path_rate=0.1
-decoder_drop_path_rate=0.1
+encoder_drop_path_rate=0.2
+decoder_drop_path_rate=0.2
 dropout=0.1
 attention_dropout=0.0
 max_src_length=80
@@ -38,15 +38,17 @@ prompt_type="prev_output"
 
 for max_epoch in {20,}; do
   echo "max_epoch "${max_epoch}
-  for lr in {5e-5,}; do
+  for lr in {2e-5,}; do
     echo "lr "${lr}
 
     log_file=${log_dir}/${max_epoch}"_"${lr}".log"
     save_path=${save_dir}/${max_epoch}"_"${lr}
     mkdir -p $save_path
 
-    CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python3 -m torch.distributed.launch --nproc_per_node=8 --master_port=${MASTER_PORT} ../../train.py \
+    CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python3 -m torch.distributed.launch \
+        --nproc_per_node=8 --master_port=${MASTER_PORT} ../../train.py \
         $data \
+        --ddp-backend fully_sharded \
         --selected-cols=${selected_cols} \
         --bpe-dir=${bpe_dir} \
         --user-dir=${user_dir} \
@@ -94,7 +96,8 @@ for max_epoch in {20,}; do
         --add-caption \
         --fp16 \
         --fp16-scale-window=512 \
-        --num-workers=2
+        --num-workers=0 > ${log_file}
   done
 done
-#> ${log_file} 2>&1
+
+# 2>&1
