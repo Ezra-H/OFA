@@ -479,7 +479,7 @@ class TransformerEncoder(FairseqEncoder):
 
         use_gradient_checkpoint = args.checkpoint_activations
         for i in range(args.encoder_layers):
-            if use_gradient_checkpoint and (i+1) % args.gradient_checkpoint_interval  == 0:
+            if use_gradient_checkpoint and (i+1) % args.gradient_checkpoint_interval == 0:
                 args.checkpoint_activations = True
             elif use_gradient_checkpoint:
                 args.checkpoint_activations = False
