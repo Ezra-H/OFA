@@ -50,7 +50,7 @@ class PMRDatasetReturnImg(Dataset):
                  split='train', use_adv=False,
                  use_syn_caption=False, syn_caption_root=None,
                  whole_img_first=False,
-                 add_bbox_info=False,num_bins=1000):
+                 add_bbox_info=False, num_bins=1000):
         super(PMRDatasetReturnImg, self).__init__()
         
         self.img_db = img_db
