@@ -55,13 +55,19 @@ class PMRDatasetReturnImg(Dataset):
         
         self.img_db = img_db
         
-        assert split in ['train', 'val', 'test']
+        # assert split in ['train', 'val', 'test', 'trainval']
         self.split = split
         
         self.transform = transform
         
-        self.annos = read_jsonl(anno_dir)
-        
+        print(anno_dir)
+        all_annos = []
+        if isinstance(anno_dir, str):
+            anno_dir = [anno_dir]
+        for a in anno_dir:
+            all_annos += read_jsonl(a)
+        self.annos = all_annos
+
         adv_map = dict(train='train-adv.jsonl', val='val-adv.jsonl')
         
         self.whole_img_first=whole_img_first
@@ -75,8 +81,15 @@ class PMRDatasetReturnImg(Dataset):
         self.syn_captions = None
         self.syn_captions_adv = None
         if self.use_syn_caption:
-            self.syn_captions = read_json(
-                os.path.join(self.syn_caption_root, os.path.split(anno_dir)[1].replace('jsonl', 'json')))
+            # self.syn_captions = read_json(
+            #     os.path.join(self.syn_caption_root, os.path.split(anno_dir)[1].replace('jsonl', 'json')))
+            
+            all_syn_captions = dict()
+            for a in anno_dir:
+                all_syn_captions.update(read_json(
+                    os.path.join(self.syn_caption_root, os.path.split(a)[1].replace('jsonl', 'json'))))
+            self.syn_captions = all_syn_captions
+            # self.syn_captions = read_json(os.path.join())
         
         self.annos_adv = None
         if self.use_adv and split in ['train', 'val']:

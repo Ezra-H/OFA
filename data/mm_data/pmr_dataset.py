@@ -143,6 +143,7 @@ class PMRDataset(OFADataset):
         self.patch_resize_transform = T.Compose([
             lambda image, target: (image.convert("RGB"), target),
             T.Resize((patch_image_size, patch_image_size)),
+            # T.RandomHorizontalFlip(),
             T.ToTensor(),
             T.Normalize(mean=mean, std=std, max_image_size=patch_image_size)
         ])

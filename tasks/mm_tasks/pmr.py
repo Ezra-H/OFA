@@ -32,7 +32,7 @@ class PMRConfig(OFAConfig):
         metadata={"help": 'answer to label dict'},
     )
     data_root: Optional[str] = field(
-        default='/data5/huangrunhui/proj7/pmr_hcp/dataset/',
+        default='/data5/huangrunhui/proj7/OFA/dataset/',
         metadata={"help": "add caption to encoder"},
     )
     img_dir: Optional[str] = field(
@@ -48,7 +48,7 @@ class PMRConfig(OFAConfig):
         metadata={"help": "use blip-generated caption to encoder"},
     )
     syn_caption_root: Optional[str] = field(
-        default='/data5/huangrunhui/proj7/pmr_hcp/dataset/blip_caption',
+        default='blip_caption',
         metadata={"help": "use blip-generated caption to encoder"},
     )
     valid_batch_size: int = field(
@@ -71,7 +71,12 @@ class PMRConfig(OFAConfig):
         default=False,
         metadata={"help": "add caption to encoder"},
     )
-    
+    add_val_to_train: Optional[int] = field(
+        default=0,
+        metadata={"help": "add val set to training"},
+    )
+
+
 @register_task("pmr", dataclass=PMRConfig)
 class PMRTask(OFATask):
     def __init__(self, cfg: PMRConfig, src_dict, tgt_dict):
@@ -82,22 +87,38 @@ class PMRTask(OFATask):
         paths = self.cfg.data.split(',')
         assert len(paths) > 0
 
-        split2file = dict(train='train-ori.jsonl',
-                          val='val-ori.jsonl',
-                          test='test-ori-without-label.jsonl')
+        split2file = dict(train=['train-ori.jsonl'],
+                          trainval=['train-ori.jsonl', 'val-ori.jsonl'],
+                          trainvalnew=['train-ori.jsonl', 'val-ori-easy.jsonl'],
+                          val=['val-ori.jsonl'],
+                          val_hard=['val-ori-hard.jsonl'],
+                          test=['test-ori-without-label.jsonl'])
         
         split2adv_file = dict(train='train-adv.jsonl',
                               val='val-adv.jsonl',
+                              trainval=['train-adv.jsonl', 'val-adv.jsonl'],
+                              trainvalnew=['train-adv.jsonl', 'val-adv.jsonl'],
                               test='test-ori-without-label.jsonl')  # TODO(HUI): test not release.
 
         split_pmr = 'val' if split == 'valid' else split
+        if split_pmr == 'train':
+            if self.cfg.add_val_to_train == 1:
+                split_pmr = 'trainval'
+            elif self.cfg.add_val_to_train == 2:
+                split_pmr = 'trainvalnew'
+            else:
+                raise RuntimeError
+        elif split_pmr == 'val':
+            if self.cfg.add_val_to_train == 2:
+                split_pmr = 'val_hard'
+                
         dataset = PMRDatasetForOFA(
             img_db=os.path.join(self.cfg.data_root, self.cfg.img_dir),
-            anno_dir=os.path.join(self.cfg.data_root, split2file[split_pmr]),
+            anno_dir=[os.path.join(self.cfg.data_root, a) for a in split2file[split_pmr]],
             split=split_pmr,
             use_adv=self.cfg.use_adv,
             use_syn_caption=self.cfg.use_syn_caption,
-            syn_caption_root=self.cfg.syn_caption_root,
+            syn_caption_root=os.path.join(self.cfg.data_root, self.cfg.syn_caption_root),
             add_bbox_info=self.cfg.add_bbox_info)
 
         self.datasets[split] = PMRDataset(
