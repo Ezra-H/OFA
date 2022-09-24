@@ -34,12 +34,25 @@ Follow the [tools/README.md](README.md) to prepare extra caption for all regions
 ## Run
 Need at least 8 GPUs 3090 to run.
 
+Run the training without synthetic captions.
+
     cd run_scripts/pmr
-    bash run_scripts/pmr/train_pmr_huge_syn_caption.sh
-    
+    bash train_pmr_huge.sh
+    bash evaluate_pmr_huge.sh
+
+Run the training with synthetic captions.
+
+    cd run_scripts/pmr
+    bash train_pmr_huge_syn_caption.sh
+    bash evaluate_pmr_huge_syn_caption.sh
+
 Run the training on train set and val set:
 
     python split_val.py
     cd run_scripts/pmr
-    bash run_scripts/pmr/train_pmr_huge_syn_caption.sh
-    
+    bash train_pmr_huge_syn_caption_trainval_new.sh
+    bash evaluate_pmr_huge_syn_caption_trainval_new.sh
+
+Ensemble several models' prediction:
+
+    python ensemble_vote.py

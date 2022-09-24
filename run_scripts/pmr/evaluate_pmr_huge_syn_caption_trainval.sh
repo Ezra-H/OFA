@@ -9,11 +9,11 @@ bpe_dir=../../utils/BPE
 
 # dev or test
 split=$1
-split=val
+split=test
 
 data=../../dataset/pmr/pmr_${split}.tsv
-path=./checkpoints_huge_syn_caption/20_2e-5/checkpoint_best.pt
-result_path=./checkpoints_huge_syn_caption/20_2e-5/
+path=./checkpoints_huge_syn_caption_trainval/20_2e-5/checkpoint_best.pt
+result_path=./checkpoints_huge_syn_caption_trainval/20_2e-5/
 selected_cols=0,2,3,4,5
 
 CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python3 -m torch.distributed.launch --nproc_per_node=1 \
